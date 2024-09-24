@@ -1,233 +1,214 @@
-import { initializeServer } from '../src/server'
-import { Server } from '@hapi/hapi'
+import request from 'supertest';
+import { DataSource } from 'typeorm';
+import { Test, TestingModule } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
+import { AppModule } from '../src/app.module';
 
-describe('E2E Tests', () => {
-    let server: Server
-    type Item = {
-        id: number
-        name: string
-        price: number
+describe('Api Controller Item test (e2e)', () => {
+  let app: INestApplication;
+  let connection: DataSource;
+
+  beforeEach(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    await app.init();
+    connection = moduleFixture.get(DataSource);
+
+    if (!connection.isInitialized) {
+      await connection.initialize();
     }
 
-    beforeEach(async () => {
-        server = await initializeServer()
-    })
+    await connection.query('TRUNCATE TABLE item CASCADE');
+  });
 
-    it('should get a response with status code 200', async () => {
-        await server.inject({
-            method: 'GET',
-            url: '/ping'
+  afterAll(async () => {
+    await connection.destroy();
+    await app.close();
+  });
+
+  it('should get a response with status code 200', async () => {
+    await request(app.getHttpServer())
+      .get('/ping')
+      .expect(200)
+      .expect({ ok: true });
+  });
+
+  describe('Basic Items functionality', () => {
+    it('should be able to list all items', async () => {
+      await request(app.getHttpServer())
+        .get('/items')
+        .expect(200)
+        .expect([]);
+
+      await request(app.getHttpServer())
+        .post('/items')
+        .send({
+          name: 'Item 1',
+          price: 10,
         })
-            .then(response => {
-                expect(response.statusCode).toBe(200)
-                expect(response.result).toEqual({ ok: true })
-            })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .get('/items')
+        .expect(200)
+        .expect((res) => {
+            expect(res.body).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        id: expect.any(Number),
+                        name: 'Item 1',
+                        price: 10,
+                    }),
+                ])
+            );
+        });
     });
 
-    describe("Basic Items functionality", () => {
-        it("should be able to list all items", async () => {
-            const response = await server.inject({
-                method: 'GET',
-                url: '/items'
-            })
-            expect(response.statusCode).toBe(200)
-            expect(response.result).toEqual([])
+    it('should be able to create a new item and get it by id', async () => {
+      const createResponse = await request(app.getHttpServer())
+        .post('/items')
+        .send({
+          name: 'Item 1',
+          price: 10,
+        })
+        .expect(201);
 
-            await server.inject({
-                method: 'POST',
-                url: '/items',
-                payload: {
-                    name: 'Item 1',
-                    price: 10
-                }
-            })
+      const createdItemId = createResponse.body.id;
 
-            const response2 = await server.inject({
-                method: 'GET',
-                url: '/items'
-            })
-            expect(response2.statusCode).toBe(200)
-            expect(response2.result).toEqual([{
+      await request(app.getHttpServer())
+        .get(`/items/${createdItemId}`)
+        .expect(200)
+        .expect((res) => {
+            expect(res.body).toEqual(
+              expect.objectContaining({
                 id: expect.any(Number),
                 name: 'Item 1',
-                price: 10
-            }])
+                price: 10,
+              })
+            );
+          });
+    });
+
+    it('should be able to update an item', async () => {
+      const createResponse = await request(app.getHttpServer())
+        .post('/items')
+        .send({
+          name: 'Item 1',
+          price: 10,
         })
+        .expect(201);
 
-        it("should be able to create a new item and get it by id", async () => {
-            const response = await server.inject<Item>({
-                method: 'POST',
-                url: '/items',
-                payload: {
-                    name: 'Item 1',
-                    price: 10
-                }
-            })
-            expect(response.statusCode).toBe(201)
-            expect(response.result).toEqual({
-                id: expect.any(Number),
-                name: 'Item 1',
-                price: 10
-            })
+      const createdItemId = createResponse.body.id;
 
-            const response2 = await server.inject({
-                method: 'GET',
-                url: `/items/${response.result!.id}`
-            })
-
-            expect(response2.statusCode).toBe(200)
-            expect(response2.result).toEqual({
-                id: expect.any(Number),
-                name: 'Item 1',
-                price: 10
-            })
+      await request(app.getHttpServer())
+        .put(`/items/${createdItemId}`)
+        .send({
+          name: 'Item 1 updated',
+          price: 20,
         })
+        .expect(200)
+        .expect({
+          id: createdItemId,
+          name: 'Item 1 updated',
+          price: 20,
+        });
 
-        it("should be able to update an item", async () => {
-            const { result: createdItem } = await server.inject<Item>({
-                method: 'POST',
-                url: '/items',
-                payload: {
-                    name: 'Item 1',
-                    price: 10
-                }
-            })
+      await request(app.getHttpServer())
+        .get(`/items/${createdItemId}`)
+        .expect(200)
+        .expect({
+          id: createdItemId,
+          name: 'Item 1 updated',
+          price: 20,
+        });
+    });
 
-            expect(createdItem).toBeDefined()
-
-            const response = await server.inject({
-                method: 'PUT',
-                url: `/items/${createdItem!.id}`,
-                payload: {
-                    name: 'Item 1 updated',
-                    price: 20
-                }
-            })
-            expect(response.statusCode).toBe(200)
-            expect(response.result).toEqual({
-                id: createdItem!.id,
-                name: 'Item 1 updated',
-                price: 20
-            })
-
-            const response2 = await server.inject({
-                method: 'GET',
-                url: `/items/${createdItem!.id}`
-            })
-            expect(response2.statusCode).toBe(200)
-            expect(response2.result).toEqual({
-                id: createdItem!.id,
-                name: 'Item 1 updated',
-                price: 20
-            })
+    it('should be able to delete an item', async () => {
+      const createResponse = await request(app.getHttpServer())
+        .post('/items')
+        .send({
+          name: 'Item 1',
+          price: 10,
         })
+        .expect(201);
 
-        it("should be able to delete an item", async () => {
-            const { result: createdItem } = await server.inject<Item>({
-                method: 'POST',
-                url: '/items',
-                payload: {
-                    name: 'Item 1',
-                    price: 10
-                }
-            })
+      const createdItemId = createResponse.body.id;
 
-            expect(createdItem).toBeDefined()
+      await request(app.getHttpServer())
+        .delete(`/items/${createdItemId}`)
+        .expect(204);
 
-            const response = await server.inject({
-                method: 'DELETE',
-                url: `/items/${createdItem!.id}`
-            })
-            expect(response.statusCode).toBe(204)
+      await request(app.getHttpServer())
+        .get(`/items/${createdItemId}`)
+        .expect(404);
+    });
+  });
 
-            const response2 = await server.inject({
-                method: 'GET',
-                url: `/items/${createdItem!.id}`
-            })
-
-            expect(response2.statusCode).toBe(404)
+  describe('Validations', () => {
+    it('should validate required fields', async () => {
+      await request(app.getHttpServer())
+        .post('/items')
+        .send({
+          name: 'Item 1',
         })
-    })
+        .expect(400)
+        .expect({
+          errors: [
+            {
+              field: 'price',
+              message: 'Field "price" is required',
+            },
+          ],
+        });
+    });
 
-    describe("Validations", () => {
-
-        it("should validate required fields", async ()=>{
-
-            const response = await server.inject({
-                method: 'POST',
-                url: '/items',
-                payload: {
-                    name: 'Item 1'
-                }
-            })
-
-            expect(response.statusCode).toBe(400)
-            expect(response.result).toEqual({
-                errors: [
-                    {
-                        field: 'price',
-                        message: 'Field "price" is required'
-                    }
-                ]
-            })
-
+    it('should not allow for negative pricing for new items', async () => {
+      await request(app.getHttpServer())
+        .post('/items')
+        .send({
+          name: 'Item 1',
+          price: -10,
         })
+        .expect(400)
+        .expect({
+          errors: [
+            {
+              field: 'price',
+              message: 'Field "price" cannot be negative',
+            },
+          ],
+        });
+    });
 
-        it("should not allow for negative pricing for new items", async ()=>{
-            const response = await server.inject({
-                method: 'POST',
-                url: '/items',
-                payload: {
-                    name: 'Item 1',
-                    price: -10
-                }
-            })
-
-            expect(response.statusCode).toBe(400)
-            expect(response.result).toEqual({
-                errors: [
-                    {
-                        field: 'price',
-                        message: 'Field "price" cannot be negative'
-                    }
-                ]
-            })
+    it('should not allow for negative pricing for updated items', async () => {
+      const createResponse = await request(app.getHttpServer())
+        .post('/items')
+        .send({
+          name: 'Item 1',
+          price: 10,
         })
+        .expect(201);
 
-        it("should not allow for negative pricing for updated items", async ()=>{
-            const { result: createdItem } = await server.inject<Item>({
-                method: 'POST',
-                url: '/items',
-                payload: {
-                    name: 'Item 1',
-                    price: 10
-                }
-            })
+      const createdItemId = createResponse.body.id;
 
-            expect(createdItem).toBeDefined()
-
-            const response = await server.inject({
-                method: 'PUT',
-                url: `/items/${createdItem!.id}`,
-                payload: {
-                    name: 'Item 1 updated',
-                    price: -20
-                }
-            })
-
-            expect(response.statusCode).toBe(400)
-            expect(response.result).toEqual({
-                errors: [
-                    {
-                        field: 'price',
-                        message: 'Field "price" cannot be negative'
-                    }
-                ]
-            })
+      await request(app.getHttpServer())
+        .put(`/items/${createdItemId}`)
+        .send({
+          name: 'Item 1 updated',
+          price: -20,
         })
-    })
-
-    afterAll(() => {
-        return server.stop()
-    })
-})
+        .expect(400)
+        .expect({
+          errors: [
+            {
+              field: 'price',
+              message: 'Field "price" cannot be negative',
+            },
+          ],
+        });
+    });
+  });
+});

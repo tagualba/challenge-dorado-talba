@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:13
+    container_name: challenge_dorado_postgres
+    environment:
+      POSTGRES_USER: postgress
+      POSTGRES_PASSWORD: postgress
+      POSTGRES_DB: challenge_dorado
+    ports:
+      - "5050:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - app_net
+
+  app:
+    build:
+      context: ..
+      dockerfile: ./.devcontainer/Dockerfile
+    container_name: challenge_dorado_api
+    ports:
+      - "3000:3000"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: postgress
+      DB_PASSWORD: postgress
+      DB_NAME: challenge_dorado
+    depends_on:
+      - postgres
+    networks:
+      - app_net
+
+networks:
+  app_net:
+    driver: bridge
+
+volumes:
+  pgdata:

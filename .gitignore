@@ -1,2 +1,4 @@
 node_modules
 mock.ts
+.DS_Store
+.package-lock.json
